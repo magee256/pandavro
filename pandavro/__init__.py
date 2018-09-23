@@ -39,27 +39,53 @@ def __schema_infer(df):
     return schema
 
 
-def __file_to_dataframe(f, schema):
+def __file_to_dataframe_direct(f, schema):
     reader = fastavro.reader(f, reader_schema=schema)
     return pd.DataFrame.from_records(list(reader))
 
 
-def from_avro(file_path_or_buffer, schema=None):
+def __file_to_dataframe_gen(f, chunksize, schema):
+    reader = fastavro.reader(f, reader_schema=schema)
+    record_list = []
+    for i, record in enumerate(reader):
+        record_list.append(record)
+        if (i + 1) % chunksize == 0:
+            yield pd.DataFrame.from_records(record_list)
+            record_list = []
+    yield pd.DataFrame.from_records(record_list)
+            
+
+def __from_avro_gen(file_buffer, schema, chunksize):
+    df_gen = __file_to_dataframe_gen(file_buffer, schema, chunksize)
+    for df in df_gen:
+        yield df
+
+
+def __from_avro_direct(file_buffer, schema):
+    return __file_to_dataframe(file_path_or_buffer, schema)
+
+
+def from_avro(file_path_or_buffer, schema=None, chunksize=None):
     """
     Avro file reader.
 
     Args:
         file_path_or_buffer: Input file path or file-like object.
         schema: Avro schema.
+        chunksize: The number of 
 
     Returns:
-        Class of pd.DataFrame.
+        pd.DataFrame or a pd.DataFrame generator if chunksize specified
     """
     if isinstance(file_path_or_buffer, str):
-        with open(file_path_or_buffer, 'rb') as f:
-            return __file_to_dataframe(f, schema)
+        file_buffer = open(file_path_or_buffer, 'rb')
     else:
-        return __file_to_dataframe(file_path_or_buffer, schema)
+        file_buffer = file_path_or_buffer
+
+    if chunksize is None:
+        return __from_avro_direct(file_buffer, schema)
+    else:
+        return __from_avro_gen(file_buffer, schema, chunksize)
 
 
 def to_avro(file_path, df, schema=None):
